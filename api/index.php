@@ -22,7 +22,8 @@ try {
 
     /* ---------- before sign-in: who runs this Loop ---------- */
     case 'info': {
-      out(['ok' => true, 'org' => org_name(), 'orgShort' => org_short(), 'peopleSource' => people_source(), 'version' => LOOP_VERSION]);
+      require_once __DIR__ . '/sso.php';
+      out(['ok' => true, 'org' => org_name(), 'orgShort' => org_short(), 'peopleSource' => people_source(), 'version' => LOOP_VERSION, 'sso' => sso_enabled()]);
     }
 
     /* ---------- sign-in: a 6-digit code to the person's email ---------- */

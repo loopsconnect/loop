@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 
-const LOOP_VERSION = '3.0.0';
+const LOOP_VERSION = '3.1.0';
 
 if (!is_file(__DIR__ . '/config.php')) {
   http_response_code(503);

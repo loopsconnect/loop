@@ -93,6 +93,7 @@ The cron job:
   2. Set `'path' => '/home/u123456789/loop-files'` in the `storage` block of `api/config.php`.
   3. Admins can then run **You › Check file store** to confirm it works.
 - Optional: for a logo at the top of emails, upload `icons/logo.png` (about 300 px wide).
+- Optional: let people sign in with Google Workspace or Microsoft 365. See "Sign in with Google or Microsoft" in README.md; it takes about ten minutes.
 
 ## Tell your team
 

@@ -53,6 +53,14 @@ return [
   'anthropic_model' => 'claude-haiku-5-5',
   'ai_per_hour'     => 40,
 
+  // Sign in with Google or Microsoft (optional, alongside email codes). Only people already on this Loop can sign in.
+  // Set up the app in Google Cloud / Microsoft Entra first; see README, "Sign in with Google or Microsoft".
+  // Redirect URI to register:  <app_url>/api/sso.php?p=google   or   <app_url>/api/sso.php?p=microsoft
+  'sso' => [
+    'google'    => ['client_id' => '', 'client_secret' => '', 'domain' => ''],   // domain: e.g. 'yourschool.edu.in' to allow only that Workspace
+    'microsoft' => ['client_id' => '', 'client_secret' => '', 'tenant' => ''],   // tenant: your Directory (tenant) ID, a GUID
+  ],
+
   // Lets your other apps post into Loop (see README, "Posting into Loop"). A long random string; empty = off.
   'hook_token' => '',
 

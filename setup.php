@@ -114,6 +114,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !$errors) {
       'secret' => bin2hex(random_bytes(24)),
       'anthropic_key' => v('anthropic_key'), 'anthropic_model' => 'claude-haiku-5-5', 'ai_per_hour' => 40,
       'hook_token' => '',
+      'sso' => ['google' => ['client_id' => '', 'client_secret' => '', 'domain' => ''], 'microsoft' => ['client_id' => '', 'client_secret' => '', 'tenant' => '']],
       'storage' => ['driver' => 'local', 'path' => '', 'endpoint' => '', 'bucket' => 'loop', 'key' => '', 'secret' => '', 'region' => 'us-east-1', 'max_mb' => 25, 'talk_days' => 30],
     ];
     if (getenv('LOOP_TEST_MAIL_LOG')) $cfg['mail_log'] = getenv('LOOP_TEST_MAIL_LOG');   // automated tests only

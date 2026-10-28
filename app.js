@@ -36,7 +36,7 @@ function load(k){try{ return localStorage.getItem(k); }catch(e){ return null; }}
 function org(){ if(!S.org){ try{ S.org = JSON.parse(load('loop.org') || 'null'); }catch(e){} } return S.org || {name:'', short:'', peopleSource:'local'}; }
 function orgShort(){ return org().short || org().name || ''; }
 function isLocal(){ return org().peopleSource !== 'portal'; }
-function setOrg(o){ if(!o) return; S.org = {name:o.name || o.org || '', short:o.short || o.orgShort || '', peopleSource:o.peopleSource || 'local', version:o.version || ''}; store('loop.org', JSON.stringify(S.org)); if(S.org.short || S.org.name) document.title = (S.org.short || S.org.name) + ' Loop'; }
+function setOrg(o){ if(!o) return; S.org = {name:o.name || o.org || '', short:o.short || o.orgShort || '', peopleSource:o.peopleSource || 'local', version:o.version || '', sso:Array.isArray(o.sso) ? o.sso : ((S.org && S.org.sso) || [])}; store('loop.org', JSON.stringify(S.org)); if(S.org.short || S.org.name) document.title = (S.org.short || S.org.name) + ' Loop'; }
 
 async function api(action, body){
   const opts = {credentials:'same-origin', headers:{}};
@@ -264,8 +264,12 @@ function loopCard(l, mode){
 function viewLogin(){
   const a = S.auth;
   if(!S.infoAsked){ S.infoAsked = true; api('info').then(r => { setOrg(r); if(S.view === 'login') paint(); }).catch(() => {}); }
+  const qs = new URLSearchParams(location.search);
+  if(qs.get('sso_error')){ a.err = qs.get('sso_error'); a.stage = 'email'; history.replaceState(null, '', location.pathname); }
+  const sso = (org().sso || []).filter(p => SSO_LABEL[p]);
   let html = '<div class="login"><img class="mark" src="icons/icon-192.png" alt=""><div class="head"><div class="eyebrow">'+esc(orgShort())+'</div><h1>Loop</h1><p class="muted">Asks, decisions, tasks and updates, each with a finish line.</p></div>';
   if(a.stage === 'email'){
+    if(sso.length) html += '<div class="panel">' + sso.map(p => '<a class="btn ghost wide" style="text-decoration:none" href="api/sso.php?start='+p+'" data-sso>Continue with '+SSO_LABEL[p]+'</a>').join('') + '<div class="muted" style="font-size:13.5px;text-align:center">or get a code by email</div></div>';
     html += '<form class="panel" id="f-email"><label class="f" for="l-email">Your email<input type="email" id="l-email" data-bind="auth.email" autocomplete="email" inputmode="email" value="'+esc(a.email)+'" required></label>';
     if(a.err) html += '<div class="err">'+esc(a.err)+'</div>';
     html += '<button class="btn wide" type="submit"'+(a.busy?' disabled':'')+'>'+(a.busy?'Sending code…':'Email me a code')+'</button><p class="muted" style="font-size:13.5px">'+(isLocal() ? 'Use your work email'+(orgShort() ? ' at '+esc(orgShort()) : '')+'. No password: we email you a 6-digit code.' : 'Use the email on your '+esc(orgShort())+' Resources record. No password: we email you a 6-digit code. This is separate from the shared Portal login.')+'</p></form>';
@@ -453,6 +457,7 @@ function pickCsv(){
   });
   inp.click();
 }
+const SSO_LABEL = {google:'Google', microsoft:'Microsoft'};
 const ROLE_LABEL = {member:'Member', director:'Director', admin:'Admin'};
 function roleSelect(id, bind, val){
   return '<label class="f" for="'+id+'">Role<select id="'+id+'" data-bind="'+bind+'">' + Object.keys(ROLE_LABEL).map(r => '<option value="'+r+'"'+(val===r?' selected':'')+'>'+ROLE_LABEL[r]+'</option>').join('') + '</select></label>';

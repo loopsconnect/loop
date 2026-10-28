@@ -28,7 +28,7 @@ A project of [loopsconnect.com](https://loopsconnect.com).
 
 **Guests.** You can put someone from outside your organisation on a loop. They get a private link to read, reply, answer, decide or mark done. There's no sign-up, and they only ever see that one loop.
 
-**Phone-friendly.** Loop installs to the Home Screen as an app (PWA) and supports phone notifications. Sign-in is by a 6-digit code sent by email, so there are no passwords to manage.
+**Phone-friendly.** Loop installs to the Home Screen as an app (PWA) and supports phone notifications. People sign in with a 6-digit code sent by email, or with their Google Workspace or Microsoft 365 account, so there are no passwords to manage.
 
 **Attachments.** Photos, PDFs, Office files, ZIP and DWG files, up to 25 MB each. They're stored privately on your own server, or in any S3-compatible store.
 
@@ -76,6 +76,51 @@ Admins manage everyone from **You › Manage people**:
 - **Turn off** someone who has left. This signs them out everywhere and stops new loops reaching them, but their past loops stay on record.
 
 You can also list admin and director emails in `api/config.php` under `admins` and `directors`. Those people always keep that role.
+
+## Sign in with Google or Microsoft
+
+If your organisation uses Google Workspace or Microsoft 365, people can sign in with that account instead of waiting for an emailed code. Email codes keep working alongside.
+
+- **No accounts are created this way.** The account's email must belong to someone already on your Loop (added in *Manage people*, or from Resources on the FHD Portal). Anyone else is told to ask their Loop admin.
+- **Turned-off people can't get in this way either.**
+- **No libraries are involved.** Loop uses the standard OpenID Connect code flow with PKCE, state and nonce checks.
+
+### Google Workspace
+
+1. Open [Google Cloud Console](https://console.cloud.google.com/) and create a project, e.g. "Loop".
+2. Go to **APIs & Services › OAuth consent screen**. Choose **Internal**, which limits sign-in to your Workspace, and fill in the app name and support email.
+3. Go to **APIs & Services › Credentials › Create credentials › OAuth client ID**:
+   - **Application type:** Web application
+   - **Authorised redirect URI:** `https://your-loop-address/api/sso.php?p=google`
+4. Copy the **Client ID** and **Client secret** into `api/config.php`:
+
+```php
+'sso' => [
+  'google' => ['client_id' => '…apps.googleusercontent.com', 'client_secret' => '…', 'domain' => 'yourschool.edu.in'],
+],
+```
+
+Setting `domain` means only accounts from that Workspace are accepted; personal Gmail accounts are refused.
+
+### Microsoft 365 (Entra ID)
+
+1. Open the [Microsoft Entra admin centre](https://entra.microsoft.com/) and go to **Applications › App registrations › New registration**:
+   - **Name:** Loop
+   - **Supported account types:** *Accounts in this organizational directory only* (single tenant)
+   - **Redirect URI:** platform **Web**, `https://your-loop-address/api/sso.php?p=microsoft`
+2. On the app's **Overview**, copy the **Application (client) ID** and the **Directory (tenant) ID**.
+3. Go to **Certificates & secrets › New client secret** and copy its **Value**. Note when it expires: sign-in stops working on that date until you add a new secret.
+4. Add them to `api/config.php`:
+
+```php
+'sso' => [
+  'microsoft' => ['client_id' => '…', 'client_secret' => '…', 'tenant' => 'your-directory-tenant-id'],
+],
+```
+
+Loop accepts only accounts from that one tenant. It uses each person's sign-in name (UPN), which your administrator controls, to match them on Loop.
+
+You can turn on both providers. The buttons appear on the sign-in screen as soon as `config.php` is saved.
 
 ## Attachments
 
