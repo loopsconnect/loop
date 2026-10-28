@@ -24,6 +24,12 @@ return [
 
   // Admins can manage people and settings checks. Add people as admins in Loop too (People › role).
   'admins'    => ['you@example.org'],
+  // Let anyone with an email at your organisation's own domain join by themselves: they open Loop and sign in.
+  // e.g. 'yourschool.edu.in'. Public domains (gmail.com, outlook.com…) are never allowed. Empty = off.
+  'join_domain' => '',
+  // The most people who can be on Loop at once (0 = no limit).
+  'max_people' => 0,
+
   // Directors see every space. In standalone Loop, choose them in People; you can also list emails here.
   'directors' => [],
 

@@ -4,9 +4,9 @@
 //   /usr/local/bin/php /home/<user>/public_html/loop/api/cron.php
 declare(strict_types=1);
 if (PHP_SAPI !== 'cli') { http_response_code(404); exit; }
-require __DIR__ . '/lib.php';
-require __DIR__ . '/push.php';
-require __DIR__ . '/files.php';
+require_once __DIR__ . '/lib.php';
+require_once __DIR__ . '/push.php';
+require_once __DIR__ . '/files.php';
 migrate();
 
 // Uploads that were started but never sent with a message (closed app, cancelled) are removed after a day.

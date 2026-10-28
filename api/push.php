@@ -21,7 +21,8 @@ function p256_new() { return openssl_pkey_new(['curve_name' => 'prime256v1', 'pr
 
 /** The server's VAPID key pair, created once. Returns [privateKey, rawPublic] or null if openssl can't do EC here. */
 function vapid_keys(): ?array {
-  static $cache = null;
+  static $all = [];
+  $cache = &$all[table_prefix()];   // one key pair per workspace
   if ($cache !== null) return $cache ?: null;
   $pem = q("SELECT v FROM loop_meta WHERE k = 'vapid_pem'")->fetchColumn();
   if (!$pem) {

@@ -1,5 +1,17 @@
 # Changelog
 
+## 3.2.0 (2026-10-28): Join by yourself, and ready for hosting
+
+**New**
+- **Self-join by email domain:** with `join_domain` set, anyone at your organisation's own domain can sign in and is added as a member. Public domains like gmail.com are refused.
+- **People limit:** set `max_people` to cap how many people can be on Loop. Adding, importing, turning people back on and self-joining all stop at the limit.
+- **Edit your own name:** in standalone Loop, everyone can correct their own name under You.
+- **Hosting:** one copy of Loop can now serve many separate workspaces from one database, each with its own tables. This powers the free hosted plan at loop.loopsconnect.com. Self-hosted installs are unaffected.
+
+**Upgrading from 3.1**
+- Upload the new files over the old ones. There's no database change.
+- People's cached data in the browser is refreshed once, the first time they open Loop after the upgrade.
+
 ## 3.1.0 (2026-10-28): Sign in with Google or Microsoft
 
 **New**

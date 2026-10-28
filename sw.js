@@ -1,6 +1,6 @@
 // Loop service worker: keeps the app shell available offline so it opens instantly from the Home Screen.
 // Data (api/) always goes to the network; the app keeps its own last copy.
-const VERSION = 'loop-3.1.0';
+const VERSION = 'loop-3.2.0';
 const SHELL = ['./', 'index.html', 'app.css', 'app.js', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/apple-touch-icon.png'];
 
 self.addEventListener('install', e => {

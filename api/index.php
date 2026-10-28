@@ -1,6 +1,6 @@
 <?php
 declare(strict_types=1);
-require __DIR__ . '/lib.php';
+require_once __DIR__ . '/lib.php';
 
 $action = is_string($_GET['a'] ?? null) ? $_GET['a'] : '';
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
@@ -33,6 +33,10 @@ try {
       sync_staff();
       $p = person_by_email($email);
       if (!$p) { sync_staff(true); $p = person_by_email($email); }
+      if (!$p && joins_by_domain($email)) {
+        if (people_room() < 1) fail(people_full_msg(), 403);
+        $p = ['name' => name_from_email($email)];   // joins on verifying the code
+      }
       if (!$p) fail('This email isn’t on ' . people_home() . '. ' . ask_admin_to_add(), 403);
       $recent = (int) q('SELECT COUNT(*) FROM loop_otp WHERE email = ? AND created_at > ?', [$email, ms() - 3600000])->fetchColumn();
       if ($recent >= 6) fail('Too many codes requested. Try again in an hour.', 429);
@@ -57,6 +61,11 @@ try {
       }
       q('DELETE FROM loop_otp WHERE email = ?', [$email]);
       $p = person_by_email($email);
+      if (!$p && joins_by_domain($email) && !q("SELECT 1 FROM loop_people WHERE email = ? AND source = 'm'", [$email])->fetchColumn()) {
+        if (people_room() < 1) fail(people_full_msg(), 403);
+        create_member(name_from_email($email), $email);
+        $p = person_by_email($email);
+      }
       if (!$p) fail('This email is no longer on ' . people_home() . '.', 403);
       start_session($p['id']);
       out(['ok' => true]);
@@ -68,6 +77,11 @@ try {
       $me = require_person();
       $notify = input()['notifyEmail'] ?? null;
       if ($notify !== null) q('UPDATE loop_people SET notify_email = ? WHERE id = ?', [$notify ? 1 : 0, $me['id']]);
+      if (array_key_exists('name', input()) && is_local() && $me['source'] === 'm') {
+        $name = mb_substr(trim(preg_replace('/\s+/', ' ', s_in('name', 120))), 0, 120);
+        if ($name === '') fail('Add your name.');
+        q('UPDATE loop_people SET name = ? WHERE id = ?', [$name, $me['id']]);
+      }
       out(['ok' => true]);
     }
 
@@ -99,6 +113,8 @@ try {
       $wk = week_key(ms());
       out([
         'org' => ['name' => org_name(), 'short' => org_short(), 'peopleSource' => people_source(), 'version' => LOOP_VERSION],
+        'limits' => ['maxPeople' => people_max(), 'people' => people_count(), 'joinDomain' => join_domain()],
+        'hosted' => cfg('hosted'),
         'me' => ['id' => $me['id'], 'name' => $me['name'], 'email' => $me['email'], 'title' => $me['title'], 'group' => $me['grp'],
                  'notifyEmail' => (bool) $me['notify_email'], 'isAdmin' => is_admin($me), 'isDirector' => is_director($me),
                  'nowUsed' => $me['now_week'] === $wk ? (int) $me['now_used'] : 0],

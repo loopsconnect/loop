@@ -26,14 +26,12 @@ function upsert_member(string $name, string $email, string $title, string $group
   $title = mb_substr(trim($title), 0, 120); $group = mb_substr(trim($group), 0, 120);
   $role = clean_role($role);
   $ex = q("SELECT * FROM loop_people WHERE email = ? AND source = 'm' ORDER BY active DESC LIMIT 1", [$email])->fetch();
+  if ((!$ex || !(int) $ex['active']) && people_room() < 1) fail(people_full_msg(), 409);
   if ($ex) {
     q('UPDATE loop_people SET name = ?, title = ?, grp = ?, role = ?, active = 1 WHERE id = ?', [$name, $title, $group, $role, $ex['id']]);
     return [$ex['id'], 'updated'];
   }
-  $sid = (int) q("SELECT COALESCE(MAX(source_id), 0) + 1 FROM loop_people WHERE source = 'm'")->fetchColumn();
-  $id = 'm' . $sid;
-  q('INSERT INTO loop_people (id, source, source_id, email, name, title, grp, active, role) VALUES (?,?,?,?,?,?,?,1,?)', [$id, 'm', $sid, $email, $name, $title, $group, $role]);
-  return [$id, 'added'];
+  return [create_member($name, $email, $title, $group, $role), 'added'];
 }
 function send_invite(array $p, array $from): bool {
   if (!$p['email']) return false;
@@ -77,6 +75,7 @@ switch ($action) {
     $group = array_key_exists('group', $in) ? s_in('group', 120) : $p['grp'];
     $role = array_key_exists('role', $in) ? clean_role(s_in('role', 10)) : ($p['role'] ?: 'member');
     $active = array_key_exists('active', $in) ? (!empty($in['active']) ? 1 : 0) : (int) $p['active'];
+    if ($active && !(int) $p['active'] && people_room() < 1) fail(people_full_msg(), 409);
     $email = $p['email'];
     if (array_key_exists('email', $in)) {
       $email = clean_email(s_in('email', 190));
@@ -126,6 +125,7 @@ switch ($action) {
       if (!$email) { $res['skipped'][] = ['line' => $n + 2, 'reason' => 'no valid email']; continue; }
       if ($get('name') === '') { $res['skipped'][] = ['line' => $n + 2, 'reason' => 'no name']; continue; }
       if (($other = person_by_email($email)) && $other['source'] !== 'm') { $res['skipped'][] = ['line' => $n + 2, 'reason' => 'email already used']; continue; }
+      if (!$other && people_room() < 1) { $res['skipped'][] = ['line' => $n + 2, 'reason' => 'limit of ' . people_max() . ' people reached']; continue; }
       [$id, $state] = upsert_member($get('name'), $email, $get('title'), $get('group'), $get('role'));
       $res[$state]++;
       if ($state === 'added') $newIds[] = $id;

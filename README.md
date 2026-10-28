@@ -77,6 +77,11 @@ Admins manage everyone from **You › Manage people**:
 
 You can also list admin and director emails in `api/config.php` under `admins` and `directors`. Those people always keep that role.
 
+**Let people join by themselves.** Set `'join_domain' => 'yourschool.edu.in'` in `api/config.php`. Then anyone with an email at that domain can open Loop and sign in, and they're added as a member. Share the link in your staff group instead of typing in everyone's names.
+- People can correct their own name under **You**.
+- Public email domains such as gmail.com are never accepted.
+- Set `'max_people'` if you want a ceiling.
+
 ## Sign in with Google or Microsoft
 
 If your organisation uses Google Workspace or Microsoft 365, people can sign in with that account instead of waiting for an emailed code. Email codes keep working alongside.

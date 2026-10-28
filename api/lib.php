@@ -1,15 +1,19 @@
 <?php
 declare(strict_types=1);
 
-const LOOP_VERSION = '3.1.0';
+const LOOP_VERSION = '3.2.0';
 
-if (!is_file(__DIR__ . '/config.php')) {
-  http_response_code(503);
-  header('Content-Type: application/json');
-  echo '{"error":"Loop isn’t set up yet. Open setup.php to set it up.","setup":true}';
-  exit;
+// Settings come from api/config.php. A host that runs many workspaces from one copy of Loop (loopsconnect's hosted
+// plan) sets $GLOBALS['LOOP_CFG'] itself before including this file.
+if (!isset($GLOBALS['LOOP_CFG'])) {
+  if (!is_file(__DIR__ . '/config.php')) {
+    http_response_code(503);
+    header('Content-Type: application/json');
+    echo '{"error":"Loop isn’t set up yet. Open setup.php to set it up.","setup":true}';
+    exit;
+  }
+  $GLOBALS['LOOP_CFG'] = require __DIR__ . '/config.php';
 }
-$GLOBALS['LOOP_CFG'] = require __DIR__ . '/config.php';
 date_default_timezone_set('UTC');
 
 const LOOP_TYPES = ['tell' => 'recipient', 'ask' => 'responder', 'decide' => 'decider', 'do' => 'owner', 'share' => 'recipient'];
@@ -33,10 +37,34 @@ function ask_admin_to_add(): string {
   return is_local() ? 'Ask your Loop admin to add you.' : 'Ask the admin to add it to your record in Resources, then try again.';
 }
 
+/** Every Loop table. When 'table_prefix' is set (one database shared by several workspaces), each SQL statement's
+ * table names get that prefix, so a workspace only ever sees its own tables. */
+const LOOP_TABLES = ['loop_ai_calls', 'loop_files', 'loop_guest_links', 'loop_items', 'loop_meta', 'loop_notes', 'loop_options', 'loop_otp',
+  'loop_parts', 'loop_people', 'loop_push_subs', 'loop_sessions', 'loop_space_members', 'loop_spaces', 'loop_suggestions', 'loop_talk', 'loop_talk_reads'];
+function table_prefix(): string { return (string) cfg('table_prefix', ''); }
+function loop_sql(string $sql): string {
+  $p = table_prefix();
+  return $p === '' ? $sql : (string) preg_replace('/\b(' . implode('|', LOOP_TABLES) . ')\b/', $p . '$1', $sql);
+}
+class LoopPDO extends PDO {
+  #[\ReturnTypeWillChange] public function prepare($query, $options = []) { return parent::prepare(loop_sql($query), $options); }
+  #[\ReturnTypeWillChange] public function exec($statement) { return parent::exec(loop_sql($statement)); }
+  #[\ReturnTypeWillChange] public function query($query, $fetchMode = null, ...$args) {
+    return $fetchMode === null ? parent::query(loop_sql($query)) : parent::query(loop_sql($query), $fetchMode, ...$args);
+  }
+}
+/** Per-workspace "done once" flags (a hosted cron runs several workspaces in one process). */
+function once(string $what): bool {
+  static $seen = [];
+  $k = $what . '|' . table_prefix();
+  if (isset($seen[$k])) return false;
+  return $seen[$k] = true;
+}
+
 function db(): PDO {
   static $pdo = null;
   if (!$pdo) {
-    $pdo = new PDO(
+    $pdo = new LoopPDO(
       'mysql:host=' . cfg('db_host') . ';dbname=' . cfg('db_name') . ';charset=utf8mb4',
       cfg('db_user'), cfg('db_pass'),
       [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC, PDO::ATTR_EMULATE_PREPARES => false]
@@ -121,6 +149,43 @@ function person_by_email(string $email): ?array {
   $p = q("SELECT * FROM loop_people WHERE email = ? AND active = 1 AND source IN ('s','r','m') ORDER BY source = 's' DESC, source_id LIMIT 1", [$email])->fetch();
   return $p ?: null;
 }
+
+/* ---------- how many people, and who may join by themselves (standalone Loop) ---------- */
+/** People who can sign in, not counting guests and connected apps. */
+function people_count(): int { return (int) q("SELECT COUNT(*) FROM loop_people WHERE active = 1 AND source IN ('s','r','m')")->fetchColumn(); }
+/** 'max_people' in config (the hosted free plan sets 25). 0 = no limit. */
+function people_max(): int { return max(0, (int) cfg('max_people', 0)); }
+function people_room(): int { return people_max() === 0 ? PHP_INT_MAX : max(0, people_max() - people_count()); }
+function people_full_msg(): string {
+  return 'This Loop has reached its limit of ' . people_max() . ' people. ' . (cfg('full_hint') ?: 'Turn someone off to make room.');
+}
+/** Domains anyone can get an address at, so they can never be a "join by yourself" domain. */
+const PUBLIC_MAIL_DOMAINS = ['gmail.com', 'googlemail.com', 'yahoo.com', 'yahoo.co.in', 'yahoo.in', 'outlook.com', 'hotmail.com', 'live.com', 'msn.com',
+  'icloud.com', 'me.com', 'mac.com', 'aol.com', 'proton.me', 'protonmail.com', 'zoho.com', 'zohomail.in', 'rediffmail.com', 'gmx.com', 'gmx.net',
+  'mail.com', 'yandex.com', 'yandex.ru', 'tutanota.com', 'hey.com', 'fastmail.com', 'qq.com', '163.com'];
+function clean_domain(string $d): string {
+  $d = strtolower(trim(preg_replace('/^.*@/', '', trim($d))));
+  return preg_match('/^(?=.{4,190}$)([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/', $d) ? $d : '';
+}
+/** 'join_domain': anyone with an email at this domain may sign in and add themselves, up to the people limit. */
+function join_domain(): string {
+  $d = clean_domain((string) cfg('join_domain', ''));
+  return $d !== '' && is_local() && !in_array($d, PUBLIC_MAIL_DOMAINS, true) ? $d : '';
+}
+function joins_by_domain(string $email): bool { $d = join_domain(); return $d !== '' && str_ends_with($email, '@' . $d); }
+/** "priya.nair@…" → "Priya Nair". People can correct it under You. */
+function name_from_email(string $email): string {
+  $w = preg_split('/[._\-+]+/', preg_replace('/[0-9]+/', '', strstr($email, '@', true) ?: ''), -1, PREG_SPLIT_NO_EMPTY);
+  return $w ? implode(' ', array_map(fn($x) => mb_convert_case($x, MB_CASE_TITLE), $w)) : $email;
+}
+/** Adds a member (standalone Loop). Returns the new id. */
+function create_member(string $name, string $email, string $title = '', string $group = '', string $role = 'member'): string {
+  $sid = (int) q("SELECT COALESCE(MAX(source_id), 0) + 1 FROM loop_people WHERE source = 'm'")->fetchColumn();
+  $id = 'm' . $sid;
+  q('INSERT INTO loop_people (id, source, source_id, email, name, title, grp, active, role) VALUES (?,?,?,?,?,?,?,1,?)', [$id, 'm', $sid, $email, $name, $title, $group, $role]);
+  return $id;
+}
+
 function is_admin(array $p): bool {
   if (($p['role'] ?? '') === 'admin') return true;
   return $p['email'] && in_array(strtolower($p['email']), array_map('strtolower', cfg('admins', [])), true);
@@ -173,8 +238,7 @@ const LOOP_V3_TABLES = [
 ];
 /** Small schema upgrades for installs that imported an older schema.sql. Runs once per version. */
 function migrate(): void {
-  static $done = false;
-  if ($done) return; $done = true;
+  if (!once('migrate')) return;
   $v = (int) (q("SELECT v FROM loop_meta WHERE k = 'schema'")->fetchColumn() ?: 1);
   if ($v >= 4) return;
   if ($v >= 3) { migrate_v4(); return; }

@@ -19,7 +19,7 @@ const S = {
   draft:null, reply:'', pick:null, confirmWithdraw:false, q:'',
   auth:null, ready:false, offline:false, booted:false, installEvt:null, listening:false, toastT:null,
   threads:[], talk:null, talkText:'', talkMentions:{}, mentionPick:false, mq:'', msgMenu:null, msgEdit:null, searchQ:'', searchRes:null, dmPick:false, guestAdd:null, push:null,
-  org:null, pp:null
+  org:null, pp:null, limits:{}, hosted:null, wsx:null
 };
 
 const app = document.getElementById('app');
@@ -30,8 +30,10 @@ const toastEl = document.getElementById('toast');
 function esc(s){return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function toast(msg){toastEl.textContent = msg; toastEl.hidden = false; clearTimeout(S.toastT); S.toastT = setTimeout(() => { toastEl.hidden = true; }, 2800);}
 function now(){return Date.now() + S.skew;}
-function store(k, v){try{ v === null ? localStorage.removeItem(k) : localStorage.setItem(k, v); }catch(e){}}
-function load(k){try{ return localStorage.getItem(k); }catch(e){ return null; }}
+const NS = location.pathname.replace(/[^/]*$/, '');   // one Loop per address: hosted workspaces share a browser origin
+const nsk = (k) => NS === '/' ? k : NS + k;
+function store(k, v){try{ v === null ? localStorage.removeItem(nsk(k)) : localStorage.setItem(nsk(k), v); }catch(e){}}
+function load(k){try{ return localStorage.getItem(nsk(k)); }catch(e){ return null; }}
 /** The organisation this Loop belongs to (from the server; cached so the sign-in screen knows it too). */
 function org(){ if(!S.org){ try{ S.org = JSON.parse(load('loop.org') || 'null'); }catch(e){} } return S.org || {name:'', short:'', peopleSource:'local'}; }
 function orgShort(){ return org().short || org().name || ''; }
@@ -181,6 +183,7 @@ async function sync(){
 function applyData(d){
   S.me = d.me; S.settings = d.settings || S.settings; S.spaces = d.spaces || [];
   if(d.org) setOrg(d.org);
+  S.limits = d.limits || {}; S.hosted = d.hosted || null;
   S.users = {}; (d.users || []).forEach(u => S.users[u.id] = u);
   S.loops = (d.loops || []).filter(l => TYPES[l.type]);
   S.threads = d.threads || [];
@@ -211,6 +214,7 @@ function paint(){
     else if(S.view === 'digest') html = viewDigest();
     else if(S.view === 'you') html = viewYou();
     else if(S.view === 'people') html = viewPeople();
+    else if(S.view === 'workspace') html = viewWorkspace();
     else html = viewHome();
     if(S.offline) html = '<div class="banner">You’re offline. Showing what Loop had last.</div>' + html;
   }
@@ -398,8 +402,8 @@ function viewSpace(){
 function viewYou(){
   let html = '<button class="linkbtn" data-act="go" data-v="home">'+I.back+'Back</button>';
   html += '<div class="row" style="flex-wrap:nowrap">'+av(S.me.id, true)+'<div class="head" style="min-width:0"><h1 style="font-size:26px">'+esc(S.me.name)+'</h1><span class="muted" style="overflow-wrap:anywhere">'+esc([S.me.title, S.me.group].filter(Boolean).join(' · '))+'</span><span class="muted" style="font-size:13.5px;overflow-wrap:anywhere">'+esc(S.me.email)+'</span></div></div>';
-  html += '<p class="muted" style="font-size:13.5px">'+(isLocal() ? (S.me.isAdmin ? 'Change your name and title under People below.' : 'Your name and title are set by your Loop admin. Ask them to correct anything.') : 'Your name, title and SBU come from the Resources app. Ask the admin there to correct them.')+'</p>';
-  html += '<form class="panel" id="f-me"><label class="row between" for="me-notify" style="cursor:pointer;flex-wrap:nowrap"><span>Email me when loops reach me</span><input type="checkbox" id="me-notify"'+(S.me.notifyEmail?' checked':'')+' style="width:22px;height:22px;accent-color:var(--ink);flex:none"></label>' +
+  if(!isLocal()) html += '<p class="muted" style="font-size:13.5px">Your name, title and SBU come from the Resources app. Ask the admin there to correct them.</p>';
+  html += '<form class="panel" id="f-me">' + (isLocal() ? '<label class="f" for="me-name">Your name<input type="text" id="me-name" maxlength="120" value="'+esc(S.me.name)+'"></label>' + (S.me.isAdmin ? '' : '<span class="muted" style="font-size:13px">Your title and team are set by your Loop admin.</span>') : '') + '<label class="row between" for="me-notify" style="cursor:pointer;flex-wrap:nowrap"><span>Email me when loops reach me</span><input type="checkbox" id="me-notify"'+(S.me.notifyEmail?' checked':'')+' style="width:22px;height:22px;accent-color:var(--ink);flex:none"></label>' +
     '<button class="btn small" type="submit" style="align-self:flex-start">Save</button></form>';
   html += '<div class="soft muted" style="font-size:14px">Loops arrive at '+esc((S.settings.windows||[]).map(w => { const [h,m] = w.split(':').map(Number); return clock(new Date(2000,0,1,h,m).getTime()); }).join(', '))+'. The last window is the digest for tells and shares.</div>';
   html += pushPanel();
@@ -413,7 +417,7 @@ function adminPanel(){
   const signedIn = all.filter(u => u.lastSeen);
   const noEmail = all.filter(u => !u.canSignIn).sort((a,b) => (a.group||'').localeCompare(b.group||'') || a.name.localeCompare(b.name));
   const notYet = all.filter(u => u.canSignIn && !u.lastSeen);
-  let html = '<div class="panel"><div class="eyebrow">Admin · file store</div>' +
+  let html = S.hosted ? hostedPanel() : '<div class="panel"><div class="eyebrow">Admin · file store</div>' +
     (filesOn() ? '<p style="font-size:14px">Attachments are on (up to '+S.settings.filesMaxMb+' MB each). Run this after setting up or changing the file store.</p>' : '<p style="font-size:14px">Attachments are off. Add the file store details under <span class="mono">storage</span> in api/config.php.</p>') +
     (filesOn() ? '<button class="btn ghost small" data-act="storecheck" style="align-self:flex-start">'+(S.storeCheck === 'busy' ? 'Checking…' : 'Check file store')+'</button>' : '') +
     (Array.isArray(S.storeCheck) ? '<div class="ppl">'+S.storeCheck.map(x => '<div><span>'+esc(x.step)+'</span><span class="'+(x.ok ? '' : 'err')+'" style="font-size:13px;text-align:right">'+(x.ok ? 'OK' : esc(x.detail || 'Failed'))+'</span></div>').join('')+'</div>' : '') + '</div>';
@@ -458,6 +462,58 @@ function pickCsv(){
   inp.click();
 }
 const SSO_LABEL = {google:'Google', microsoft:'Microsoft'};
+function peopleMeter(n){
+  const max = S.limits.maxPeople || 0, jd = S.limits.joinDomain || '';
+  let h = '';
+  if(max){
+    const pct = Math.min(100, Math.round(n / max * 100)), full = n >= max;
+    h += '<div class="panel" style="gap:8px"><div class="row between"><strong>'+n+' of '+max+' people</strong><span class="muted" style="font-size:13.5px">'+(full ? 'Full' : (max - n)+' left')+'</span></div>' +
+      '<div style="height:8px;border-radius:8px;background:var(--raise);overflow:hidden"><div style="height:8px;width:'+pct+'%;background:'+(full ? 'var(--now, #A1270F)' : 'var(--ink)')+'"></div></div>' +
+      (full ? '<span class="muted" style="font-size:13.5px">To add someone, turn someone else off first.'+(S.hosted ? ' Need more people? <a href="'+esc(S.hosted.selfHostUrl)+'" target="_blank" rel="noopener">Self-host LOOP</a> free, with no limit.' : '')+'</span>' : '') + '</div>';
+  }
+  if(jd) h += '<div class="soft" style="font-size:14px">Anyone with an <strong>@'+esc(jd)+'</strong> email can join by themselves: they open this Loop and sign in. '+(S.hosted ? 'Change it in <button class="linkbtn" data-act="go" data-v="workspace">Workspace settings</button>.' : '')+'</div>';
+  return h;
+}
+function hostedPanel(){
+  const H = S.hosted;
+  return '<div class="panel"><div class="eyebrow">Admin · workspace</div>' +
+    '<p style="font-size:14px"><strong>'+esc(H.plan)+' plan</strong> on LOOP by loopsconnect: up to '+H.maxPeople+' people, without file attachments or AI drafting.</p>' +
+    '<div class="row" style="gap:8px"><button class="btn small" data-act="go" data-v="workspace">Workspace settings</button><a class="btn ghost small" style="text-decoration:none" href="'+esc(H.selfHostUrl)+'" target="_blank" rel="noopener">Self-host LOOP</a></div></div>';
+}
+const WEEKDAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+async function loadWs(){
+  try{ const r = await api('ws.get', {}); S.wsx = {ws:r.ws, f:{orgName:r.ws.orgName, orgShort:r.ws.orgShort, timezone:r.ws.timezone, windows:r.ws.windows.slice(), skipDays:r.ws.skipDays.slice(), selfJoin:!!r.ws.joinDomain}, busy:false, err:'', del:''}; }
+  catch(e){ S.wsx = {err:e.message}; }
+  if(S.view === 'workspace') paint();
+}
+function viewWorkspace(){
+  let html = '<button class="linkbtn" data-act="go" data-v="you">'+I.back+'Back</button>';
+  if(!S.hosted || !S.me.isAdmin) return html + '<div class="empty">Only this workspace’s admins can change its settings.</div>';
+  const X = S.wsx;
+  if(!X){ loadWs(); return html + '<div class="head"><h1>Workspace</h1><p class="muted">Loading…</p></div>'; }
+  if(!X.ws) return html + '<div class="banner">'+esc(X.err)+'</div>';
+  const f = X.f, my = (S.me.email || '').split('@')[1] || '';
+  let zones = []; try{ zones = Intl.supportedValuesOf('timeZone'); }catch(e){}
+  if(!zones.includes(f.timezone)) zones.unshift(f.timezone);
+  html += '<div class="head"><div class="eyebrow">'+esc(orgShort())+' · admin</div><h1>Workspace</h1><p class="muted" style="overflow-wrap:anywhere">'+esc(X.ws.url)+'</p></div>';
+  if(X.err) html += '<div class="banner">'+esc(X.err)+'</div>';
+  html += '<form class="panel" id="f-ws">' +
+    '<label class="f" for="ws-name">Organisation name<input type="text" id="ws-name" data-bind="wsx.f.orgName" maxlength="120" value="'+esc(f.orgName)+'"></label>' +
+    '<label class="f" for="ws-short">Short name<input type="text" id="ws-short" data-bind="wsx.f.orgShort" maxlength="60" value="'+esc(f.orgShort)+'"><span style="font-weight:400">Used in emails, e.g. “Asha at '+esc(f.orgShort || 'Acme')+' has a question”.</span></label>' +
+    '<label class="f" for="ws-tz">Time zone<select id="ws-tz" data-bind="wsx.f.timezone">'+zones.map(z => '<option'+(z === f.timezone ? ' selected' : '')+'>'+esc(z)+'</option>').join('')+'</select></label>' +
+    '<div class="f"><span>Delivery times</span><span style="font-weight:400">Loops arrive at these times. The last one is the digest for tells and shares.</span>' +
+      f.windows.map((w, i) => '<div class="row" style="gap:8px;flex-wrap:nowrap"><input type="time" data-wsw="'+i+'" value="'+esc(w)+'" style="max-width:160px">'+(f.windows.length > 1 ? '<button type="button" class="linkbtn" data-act="wswdel" data-i="'+i+'">Remove</button>' : '')+'</div>').join('') +
+      (f.windows.length < 4 ? '<button type="button" class="linkbtn" data-act="wswadd" style="align-self:flex-start">+ Add a time</button>' : '') + '</div>' +
+    '<div class="f"><span>No deliveries on</span><div class="row" style="gap:6px">'+WEEKDAYS.map((d, i) => '<label class="chip '+(f.skipDays.includes(i) ? 'c-plain' : '')+'" style="cursor:pointer;border:1px solid var(--line)"><input type="checkbox" data-wsd="'+i+'"'+(f.skipDays.includes(i) ? ' checked' : '')+' style="accent-color:var(--ink)">'+d+'</label>').join('')+'</div></div>' +
+    '<label class="row" for="ws-join" style="cursor:pointer;flex-wrap:nowrap;gap:10px;align-items:flex-start"><input type="checkbox" id="ws-join" data-bind="wsx.f.selfJoin"'+(f.selfJoin ? ' checked' : '')+' style="width:22px;height:22px;accent-color:var(--ink);flex:none;margin-top:2px"><span><strong>Let anyone with an @'+esc(my)+' email join by themselves</strong><br><span class="muted" style="font-size:13.5px">Share this workspace’s link in your staff group: colleagues open it and sign in with their work email. It stops at '+X.ws.maxPeople+' people. Only works with your organisation’s own email domain.</span></span></label>' +
+    '<button class="btn" type="submit"'+(X.busy ? ' disabled' : '')+'>'+(X.busy ? 'Saving…' : 'Save')+'</button></form>';
+  html += '<div class="panel"><div class="eyebrow">Your data</div><p style="font-size:14px">Download everything in this workspace (people, spaces, loops, decisions and talk) as one file. It’s also how you move to your own server later.</p><button class="btn ghost small" data-act="wsexport" style="align-self:flex-start">Export everything</button></div>';
+  html += '<form class="panel" id="f-wsdel" style="border:1px solid var(--line)"><div class="eyebrow" style="color:var(--now, #A1270F)">Delete workspace</div><p style="font-size:14px">This erases '+esc(X.ws.orgName)+' for everyone: people, loops, spaces and talk. It can’t be undone. Export first if you want a copy.</p>' +
+    '<label class="f" for="ws-del"><span>Type <span class="mono">'+esc(X.ws.slug)+'</span> to confirm</span><input type="text" id="ws-del" data-bind="wsx.del" autocomplete="off" autocapitalize="none" spellcheck="false" value="'+esc(X.del)+'"></label>' +
+    '<button class="btn" type="submit" style="background:var(--now, #A1270F);color:#fff"'+(X.del.trim() === X.ws.slug ? '' : ' disabled')+'>Delete this workspace</button></form>';
+  return html;
+}
+
 const ROLE_LABEL = {member:'Member', director:'Director', admin:'Admin'};
 function roleSelect(id, bind, val){
   return '<label class="f" for="'+id+'">Role<select id="'+id+'" data-bind="'+bind+'">' + Object.keys(ROLE_LABEL).map(r => '<option value="'+r+'"'+(val===r?' selected':'')+'>'+ROLE_LABEL[r]+'</option>').join('') + '</select></label>';
@@ -469,6 +525,7 @@ function viewPeople(){
   const list = P.list || [];
   const on = list.filter(p => p.active);
   html += '<div class="head"><div class="eyebrow">'+esc(orgShort() || 'Loop')+' · admin</div><h1>People</h1><p class="muted">'+(P.list ? on.length+' on Loop'+(list.length > on.length ? ' · '+(list.length-on.length)+' turned off' : '') : 'Loading…')+'. Everyone here can sign in with their email and get loops.</p></div>';
+  html += peopleMeter(on.length);
   if(P.err) html += '<div class="banner">'+esc(P.err)+'</div>';
 
   html += '<div class="row" style="gap:8px"><button class="btn small" data-act="padd">'+(P.adding ? 'Close' : 'Add a person')+'</button><button class="btn ghost small" data-act="pimport"'+(P.busy?' disabled':'')+'>Import a spreadsheet</button></div>';
@@ -1258,6 +1315,18 @@ document.addEventListener('click', async ev => {
     case 'pactive': { const e = S.pp.edit; if(!e) return; return savePerson({id:e.id, active:!e.active}, e.active ? 'Turned off. They’re signed out.' : 'Turned back on'); }
     case 'pimport': return pickCsv();
     case 'pimpclose': S.pp.imp = null; return paint();
+    case 'wswadd': { const w = S.wsx.f.windows; w.push(w.length ? '17:30' : '11:30'); return paint(); }
+    case 'wswdel': { S.wsx.f.windows.splice(+el.dataset.i, 1); return paint(); }
+    case 'wsexport': {
+      el.disabled = true;
+      try{
+        const r = await api('ws.export', {});
+        const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(r.export, null, 2)], {type:'application/json'}));
+        a.download = r.filename; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+        toast('Export downloaded');
+      }catch(e){ toast(e.message); }
+      el.disabled = false; return;
+    }
     case 'logout': try{ await api('auth.logout', {}); }catch(e){} signedOut(); return;
   }
 });
@@ -1266,6 +1335,7 @@ document.addEventListener('input', ev => {
   const el = ev.target, b = el.dataset && el.dataset.bind; if(!b) return;
   setBind(b, el.type === 'checkbox' ? el.checked : el.value);
   if(b === 'q' || b === 'mq' || b === 'pp.q') return paint();
+  if(b === 'wsx.del'){ const btn = document.querySelector('#f-wsdel button[type=submit]'); if(btn) btn.disabled = el.value.trim() !== S.wsx.ws.slug; }
   if(b === 'searchQ'){ S.searchRes = null; return runSearch(); }
   if(b === 'talkText'){ const sb = document.querySelector('[data-act="talksend"]'); if(sb) sb.disabled = !(S.talkText.trim() || attReady('talk').length) || attBusy('talk'); el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 160) + 'px'; }
   if(b === 'reply'){ document.querySelectorAll('[data-act="note"]').forEach(x => x.disabled = !(S.reply.trim() || attReady('reply').length) || attBusy('reply')); document.querySelectorAll('[data-act="answer"]').forEach(x => x.disabled = !S.reply.trim()); }
@@ -1276,6 +1346,9 @@ document.addEventListener('keydown', ev => {
   if(ev.target && ev.target.id === 'talk-text' && ev.key === 'Enter' && !ev.shiftKey && matchMedia('(hover: hover)').matches){ ev.preventDefault(); talkSend(); }
 });
 document.addEventListener('change', ev => {
+  const t = ev.target;
+  if(t.dataset && t.dataset.wsw !== undefined && S.wsx){ S.wsx.f.windows[+t.dataset.wsw] = t.value; return; }
+  if(t.dataset && t.dataset.wsd !== undefined && S.wsx){ const d = +t.dataset.wsd, k = S.wsx.f.skipDays; t.checked ? (k.includes(d) || k.push(d)) : k.splice(k.indexOf(d), 1); return paint(); }
   const el = ev.target, b = el.dataset && el.dataset.bind; if(!b) return;
   if(el.tagName === 'SELECT' || el.type === 'checkbox' || el.type === 'date'){ setBind(b, el.type === 'checkbox' ? el.checked : el.value); paint(); }
 });
@@ -1313,9 +1386,28 @@ document.addEventListener('submit', async ev => {
     const e = S.pp.edit; if(!e) return;
     return savePerson({id:e.id, name:e.name.trim(), email:e.email.trim(), title:e.title.trim(), group:e.group.trim(), role:e.role}, 'Saved');
   }
+  if(id === 'f-ws'){
+    const X = S.wsx; if(!X || !X.f) return;
+    X.busy = true; X.err = ''; paint();
+    try{ const r = await api('ws.save', X.f); X.ws = r.ws; X.f.windows = r.ws.windows.slice(); X.f.selfJoin = !!r.ws.joinDomain; toast('Workspace saved'); await sync(); }
+    catch(e){ X.err = e.message; }
+    X.busy = false; return paint();
+  }
+  if(id === 'f-wsdel'){
+    const X = S.wsx; if(!X || X.del.trim() !== X.ws.slug) return;
+    try{
+      const r = await api('ws.delete', {confirm:X.del.trim()});
+      store(CACHE_KEY, null); store('loop.org', null);
+      app.innerHTML = '<div class="head"><div class="eyebrow">LOOP</div><h1>'+esc(X.ws.orgName)+' has been deleted.</h1><p class="muted">Everything in it has been erased. Thanks for trying LOOP.</p></div><a class="btn" href="'+esc(r.home)+'" style="align-self:flex-start;text-decoration:none">Start a new workspace</a>';
+      nav.hidden = true;
+    }catch(e){ toast(e.message); }
+    return;
+  }
   if(id === 'f-me'){
     const notifyEmail = document.getElementById('me-notify').checked;
-    await act('me.update', {notifyEmail}, 'Saved').catch(() => {});
+    const nameEl = document.getElementById('me-name');
+    if(nameEl && !nameEl.value.trim()) return toast('Add your name.');
+    await act('me.update', nameEl ? {notifyEmail, name:nameEl.value.trim()} : {notifyEmail}, 'Saved').catch(() => {});
   }
 });
 

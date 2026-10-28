@@ -17,7 +17,9 @@ const LOOP_FILE_TYPES = [
 ];
 
 function storage_cfg(): ?array {
-  static $c = false;
+  static $all = [];
+  if (!array_key_exists(table_prefix(), $all)) $all[table_prefix()] = false;
+  $c = &$all[table_prefix()];
   if ($c !== false) return $c;
   $s = cfg('storage', null);
   if (!is_array($s)) return $c = null;
@@ -117,7 +119,7 @@ function s3_delete(string $key): void {
 }
 
 function files_table(): void {
-  static $done = false; if ($done) return; $done = true;
+  if (!once('files_table')) return;
   db()->exec("CREATE TABLE IF NOT EXISTS loop_files (id VARCHAR(20) NOT NULL PRIMARY KEY, owner_id VARCHAR(20) NOT NULL, name VARCHAR(200) NOT NULL,
     mime VARCHAR(120) NOT NULL, size BIGINT NOT NULL, obj_key VARCHAR(200) NOT NULL, status VARCHAR(10) NOT NULL DEFAULT 'pending',
     ref_kind VARCHAR(10) NULL, ref_id VARCHAR(20) NULL, loop_id VARCHAR(20) NULL, thread VARCHAR(60) NULL, width INT NULL, height INT NULL,
