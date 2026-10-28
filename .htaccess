@@ -1,0 +1,13 @@
+# Loop inside the FHD Portal. HTTPS is handled by the Portal's own .htaccess.
+Options -Indexes
+<IfModule mod_headers.c>
+  Header always set X-Content-Type-Options "nosniff"
+  <FilesMatch "\.(png)$">
+    Header set Cache-Control "public, max-age=86400"
+  </FilesMatch>
+  # The app shell and service worker must never be stale.
+  <FilesMatch "^(index\.html|sw\.js|manifest\.webmanifest|app\.js|app\.css)$">
+    Header set Cache-Control "no-cache"
+  </FilesMatch>
+</IfModule>
+AddType application/manifest+json .webmanifest

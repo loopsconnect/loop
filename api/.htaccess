@@ -1,0 +1,5 @@
+# Only index.php and blob.php (signed file links) are reachable from the web. Config, library, schema and cron stay private.
+<FilesMatch "^(config\.php|config\.sample\.php|lib\.php|cron\.php|schema\.sql|more\.php|push\.php|files\.php|people\.php)$">
+  Require all denied
+</FilesMatch>
+Options -Indexes

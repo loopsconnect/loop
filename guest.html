@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Loop</title>
+<link rel="icon" type="image/png" href="icons/favicon-32.png">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Hanken+Grotesk:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<main class="app" id="app" aria-live="polite" style="padding-bottom:40px">
+  <p class="muted">Opening…</p>
+</main>
+<div class="toast" id="toast" role="status" hidden></div>
+<script>
+/* The page a person outside the organisation opens from their email link. No sign-in: the link itself is the key. */
+(function(){
+'use strict';
+const app = document.getElementById('app'), toastEl = document.getElementById('toast');
+const token = new URLSearchParams(location.search).get('t') || '';
+const S = {org:'', orgShort:'', loop:null, people:{}, me:null, text:'', pick:null, busy:false, err:'', done:''};
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const name = id => (S.people[id] && S.people[id].name) || 'Someone';
+const when = t => new Date(t).toLocaleString([], {weekday:'short', day:'numeric', month:'short', hour:'numeric', minute:'2-digit'});
+const fileLinks = {};
+function filesHtml(files){
+  if(!files || !files.length) return '';
+  const gone = files.filter(f => f.state && f.state !== 'ready'); files = files.filter(f => !f.state || f.state === 'ready');
+  return '<div class="attdocs">'+gone.map(f => '<div class="attgone">'+esc(f.name)+' · no longer available</div>').join('')+files.map(f => '<button type="button" class="attdoc" data-file="'+esc(f.id)+'"><span class="stack" style="gap:0;min-width:0;text-align:left"><span class="ell" style="font-weight:600">'+esc(f.name)+'</span><span class="muted" style="font-size:12px">'+(f.size < 1048576 ? Math.max(1, Math.round(f.size/1024))+' KB' : (f.size/1048576).toFixed(1)+' MB')+'</span></span></button>').join('')+'</div>';
+}
+function toast(m){ toastEl.textContent = m; toastEl.hidden = false; setTimeout(() => toastEl.hidden = true, 2800); }
+async function api(a, body){
+  const r = await fetch('api/?a=' + a, {method:'POST', headers:{'Content-Type':'application/json', 'X-Loop':'1'}, body:JSON.stringify(Object.assign({t:token}, body || {}))});
+  let j = {}; try{ j = await r.json(); }catch(e){}
+  if(!r.ok) throw new Error(j.error || 'Something went wrong. Try again.');
+  return j;
+}
+async function load(){
+  try{ const r = await api('guest.view'); S.loop = r.loop; S.people = r.people; S.me = r.me; S.org = r.org || ''; S.orgShort = r.orgShort || ''; S.err = ''; if(S.orgShort) document.title = S.orgShort + ' Loop'; }
+  catch(e){ S.err = e.message; }
+  render();
+}
+function render(){
+  if(S.err && !S.loop){ app.innerHTML = '<div class="head"><div class="eyebrow">Loop</div><h1>This link isn’t working</h1></div><div class="panel"><p>'+esc(S.err)+'</p></div>'; return; }
+  const l = S.loop, open = l.status === 'open', role = S.me.role;
+  const label = {tell:'Update', ask:'Question', decide:'Decision', do:'Task', share:'Shared'}[l.type] || 'Loop';
+  let h = '<div class="head"><div class="eyebrow">'+(S.org ? esc(S.org)+' · ' : '')+esc(label)+'</div><h1 style="overflow-wrap:anywhere">'+esc(l.title)+'</h1><p class="muted">From '+esc(name(l.author))+' · '+esc(when(l.createdAt))+'</p></div>';
+  if(l.body) h += '<p style="white-space:pre-wrap;overflow-wrap:anywhere">'+esc(l.body)+'</p>';
+  h += filesHtml(l.files);
+  if(l.outcome && l.status === 'closed') h += '<div class="outcome"><span class="eyebrow" style="color:var(--do)">'+({decide:'Decided', ask:'Answered', do:'Done'}[l.type] || 'Closed')+' · '+esc(name(l.outcome.by))+'</span><strong style="white-space:pre-wrap">'+esc(l.outcome.text)+'</strong>'+(l.outcome.note?'<span>'+esc(l.outcome.note)+'</span>':'')+'</div>';
+  if(l.status === 'withdrawn') h += '<div class="soft">The sender withdrew this.</div>';
+  if(l.type === 'decide'){
+    const can = open && role === 'decider';
+    h += '<div class="group">'+l.options.map((o,i) => { const on = can ? S.pick === o.id : (l.outcome && l.outcome.optionId === o.id);
+      return '<label class="opt'+(on?' on':'')+'" for="o'+i+'"><input type="radio" name="o" id="o'+i+'" data-pick="'+esc(o.id)+'"'+(on?' checked':'')+(can?'':' disabled')+'><strong>'+String.fromCharCode(65+i)+' · '+esc(o.label)+'</strong></label>'; }).join('')+'</div>';
+  }
+  const notes = Object.values(l.replies || {}).filter(n => n.kind !== 'edit').sort((a,b) => a.at - b.at);
+  if(notes.length) h += '<div class="panel"><div class="eyebrow">Replies</div><div class="thread">'+notes.map(n => '<div class="msg"><span class="who">'+esc(name(n.by))+' · '+esc(when(n.at))+'</span><span style="white-space:pre-wrap;overflow-wrap:anywhere">'+esc(n.text)+'</span>'+filesHtml(n.files)+'</div>').join('')+'</div></div>';
+  if(open){
+    let lab = 'Reply', btn = '<button class="btn" data-a="note">Send reply</button>';
+    if(l.type === 'ask' && role === 'responder'){ lab = 'Your answer'; btn = '<button class="btn" data-a="answer">Send answer</button>'; }
+    if(l.type === 'decide' && role === 'decider'){ lab = 'Note with your choice (optional)'; btn = '<button class="btn" data-a="choose"'+(S.pick?'':' disabled')+'>'+(S.pick?'Confirm choice':'Pick an option')+'</button>'; }
+    if(l.type === 'do' && role === 'owner'){ lab = 'Note (optional)'; btn = '<button class="btn" data-a="done">Mark done</button>'; }
+    h += '<div class="panel"><label class="f" for="txt">'+lab+'<textarea id="txt">'+esc(S.text)+'</textarea></label>'+(S.errAct?'<div class="err">'+esc(S.errAct)+'</div>':'')+'<div class="row end">'+(btn.includes('data-a="note"')?'':'<button class="btn ghost small" data-a="note">Just reply</button>')+btn+'</div></div>';
+  }
+  h += '<p class="muted" style="font-size:13px">This private link is for '+esc(S.me.name)+'. You can come back to it any time in the next 60 days.</p>';
+  app.innerHTML = h;
+}
+document.addEventListener('input', e => { if(e.target.id === 'txt') S.text = e.target.value; });
+document.addEventListener('click', async e => {
+  const fb = e.target.closest('[data-file]');
+  if(fb){ const w = window.open('', '_blank'); try{ const r = await api('files.get', {id:fb.dataset.file}); if(w) w.location = r.url; else location.href = r.url; }catch(err){ if(w) w.close(); toast(err.message); } return; }
+  const p = e.target.closest('[data-pick]'); if(p){ S.pick = p.dataset.pick; return render(); }
+  const b = e.target.closest('[data-a]'); if(!b || S.busy) return;
+  const a = b.dataset.a, text = S.text.trim(); S.errAct = '';
+  if((a === 'note' || a === 'answer') && !text){ S.errAct = 'Write something first.'; return render(); }
+  S.busy = true; b.disabled = true;
+  try{
+    if(a === 'note') await api('guest.note', {text});
+    if(a === 'answer') await api('guest.answer', {text});
+    if(a === 'choose') await api('guest.choose', {optionId:S.pick, note:text});
+    if(a === 'done') await api('guest.done', {note:text});
+    S.text = ''; toast(a === 'note' ? 'Reply sent' : 'Sent. Thank you.'); await load();
+  }catch(err){ S.errAct = err.message; render(); }
+  S.busy = false;
+});
+load();
+})();
+</script>
+</body>
+</html>
