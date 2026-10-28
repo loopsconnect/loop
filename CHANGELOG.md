@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.2.1 (2026-10-28): Security hardening
+
+- Sign-in codes are limited to 20 per email address per day, as well as 6 per hour, so nobody can keep guessing. Old codes are tidied after two days.
+- Session cookies are always marked secure when Loop's address is https, even behind proxies that hide it.
+- Google and Microsoft sign-in errors come back as short codes, and the app shows its own wording, so a crafted link can't put misleading text on the sign-in screen.
+- The included `.htaccess` adds browser protections: no framing by other sites, no referrer leaks, and only the camera and microphone allowed.
+- Upgrading: upload over 3.2.0. There's no database change.
+
 ## 3.2.0 (2026-10-28): Join by yourself, and ready for hosting
 
 **New**

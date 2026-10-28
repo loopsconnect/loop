@@ -8,6 +8,7 @@ require_once __DIR__ . '/lib.php';
 require_once __DIR__ . '/push.php';
 require_once __DIR__ . '/files.php';
 migrate();
+q('DELETE FROM loop_otp WHERE created_at < ?', [ms() - 2 * 86400000]);   // old sign-in codes
 
 // Uploads that were started but never sent with a message (closed app, cancelled) are removed after a day.
 if (storage_cfg()) {

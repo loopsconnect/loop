@@ -40,6 +40,7 @@ try {
       if (!$p) fail('This email isn’t on ' . people_home() . '. ' . ask_admin_to_add(), 403);
       $recent = (int) q('SELECT COUNT(*) FROM loop_otp WHERE email = ? AND created_at > ?', [$email, ms() - 3600000])->fetchColumn();
       if ($recent >= 6) fail('Too many codes requested. Try again in an hour.', 429);
+      if ((int) q('SELECT COUNT(*) FROM loop_otp WHERE email = ? AND created_at > ?', [$email, ms() - 86400000])->fetchColumn() >= 20) fail('Too many codes requested today. Try again tomorrow.', 429);
       $code = str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
       q('INSERT INTO loop_otp (email, code_hash, created_at, expires_at) VALUES (?,?,?,?)', [$email, hash('sha256', $email . '|' . $code), ms(), ms() + 600000]);
       $sent = send_mail($email, "Your Loop code: $code", "Hi {$p['name']},\n\nYour " . org_short() . " Loop sign-in code is $code\n\nIt works for 10 minutes. If you didn't ask for it, ignore this email.\n\n" . cfg('app_url'),

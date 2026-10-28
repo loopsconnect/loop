@@ -269,7 +269,7 @@ function viewLogin(){
   const a = S.auth;
   if(!S.infoAsked){ S.infoAsked = true; api('info').then(r => { setOrg(r); if(S.view === 'login') paint(); }).catch(() => {}); }
   const qs = new URLSearchParams(location.search);
-  if(qs.get('sso_error')){ a.err = qs.get('sso_error'); a.stage = 'email'; history.replaceState(null, '', location.pathname); }
+  if(qs.get('sso_error')){ a.err = ssoMessage(qs.get('sso_error'), qs.get('sso'), qs.get('sso_email')); a.stage = 'email'; history.replaceState(null, '', location.pathname); }
   const sso = (org().sso || []).filter(p => SSO_LABEL[p]);
   let html = '<div class="login"><img class="mark" src="icons/icon-192.png" alt=""><div class="head"><div class="eyebrow">'+esc(orgShort())+'</div><h1>Loop</h1><p class="muted">Asks, decisions, tasks and updates, each with a finish line.</p></div>';
   if(a.stage === 'email'){
@@ -462,6 +462,22 @@ function pickCsv(){
   inp.click();
 }
 const SSO_LABEL = {google:'Google', microsoft:'Microsoft'};
+/** Sign-in errors arrive as short codes, so a link can't put arbitrary words on this screen. */
+function ssoMessage(code, p, email){
+  const label = SSO_LABEL[p] || 'single sign-on';
+  const okEmail = /^[^\s@<>"']{1,64}@[a-z0-9.-]{1,190}\.[a-z]{2,}$/i.test(email || '') ? email : '';
+  return ({
+    notset: 'That sign-in option isn’t set up on this Loop.',
+    cancelled: 'Sign-in was cancelled.',
+    failed: 'The '+label+' sign-in didn’t work. Try again, or use an email code.',
+    expired: 'Sign-in took too long. Please try again.',
+    unverified: 'That Google account’s email isn’t verified.',
+    domain: 'Use your organisation’s Google account.',
+    tenant: 'Use your work Microsoft account.',
+    noemail: 'That account has no email address Loop can use.',
+    notfound: (okEmail || 'That account')+' isn’t on '+(orgShort() ? orgShort()+'’s Loop' : 'this Loop')+'. Ask your Loop admin to add you, or sign in with the email they used.'
+  })[code] || 'Sign-in couldn’t be checked. Please try again.';
+}
 function peopleMeter(n){
   const max = S.limits.maxPeople || 0, jd = S.limits.joinDomain || '';
   let h = '';

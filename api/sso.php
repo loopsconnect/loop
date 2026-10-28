@@ -41,10 +41,12 @@ function sso_redirect_uri(string $p): string { return rtrim((string) cfg('app_ur
 function sso_b64u(string $s): string { return rtrim(strtr(base64_encode($s), '+/', '-_'), '='); }
 function sso_b64u_dec(string $s): string { return (string) base64_decode(strtr($s, '-_', '+/') . str_repeat('=', (4 - strlen($s) % 4) % 4)); }
 
-/** Back to the app, with a message for the sign-in screen when something went wrong. */
-function sso_back(?string $error = null): void {
+/** Back to the app. When something went wrong, a short code (not free text, so links can't put words on
+ *  the sign-in screen); the app turns it into the message. */
+function sso_back(?string $error = null, string $email = ''): void {
   setcookie(SSO_COOKIE, '', ['expires' => 1, 'path' => cookie_path() . 'api/', 'secure' => is_https(), 'httponly' => true, 'samesite' => 'Lax']);
-  $url = rtrim((string) cfg('app_url'), '/') . '/' . ($error !== null ? '?sso_error=' . rawurlencode($error) : '');
+  $q = $error !== null ? ['sso_error' => $error] + ($email !== '' ? ['sso_email' => $email] : []) + (isset($GLOBALS['sso_p']) ? ['sso' => $GLOBALS['sso_p']] : []) : [];
+  $url = rtrim((string) cfg('app_url'), '/') . '/' . ($q ? '?' . http_build_query($q) : '');
   header('Location: ' . $url, true, 303);
   header('Cache-Control: no-store');
   exit;
@@ -59,7 +61,7 @@ header('Referrer-Policy: no-referrer');
 if (isset($_GET['start'])) {
   $p = (string) $_GET['start'];
   $prov = sso_provider($p);
-  if (!$prov) sso_back('That sign-in option isn’t set up on this Loop.');
+  if (!$prov) sso_back('notset');
   $state = sso_b64u(random_bytes(24)); $nonce = sso_b64u(random_bytes(24)); $verifier = sso_b64u(random_bytes(48));
   $payload = json_encode(['p' => $p, 's' => $state, 'n' => $nonce, 'v' => $verifier, 'e' => time() + 600]);
   $cookie = sso_b64u($payload) . '.' . sso_b64u(hash_hmac('sha256', $payload, (string) cfg('secret'), true));
@@ -77,8 +79,9 @@ if (isset($_GET['start'])) {
 /* ---------- 2. Callback: check everything, then sign in ---------- */
 $p = (string) ($_GET['p'] ?? '');
 $prov = sso_provider($p);
-if (!$prov) sso_back('That sign-in option isn’t set up on this Loop.');
-if (isset($_GET['error'])) sso_back($_GET['error'] === 'access_denied' ? 'Sign-in was cancelled.' : 'The ' . $prov['label'] . ' sign-in didn’t work. Try again, or use an email code.');
+if (!$prov) sso_back('notset');
+$GLOBALS['sso_p'] = $p;
+if (isset($_GET['error'])) sso_back($_GET['error'] === 'access_denied' ? 'cancelled' : 'failed');
 
 // The cookie we set in step 1 must be here, untouched, unexpired, for this provider, with the same state.
 $raw = (string) ($_COOKIE[SSO_COOKIE] ?? '');
@@ -88,10 +91,10 @@ if (count($parts) === 2) {
   $payload = sso_b64u_dec($parts[0]);
   if (hash_equals(sso_b64u(hash_hmac('sha256', $payload, (string) cfg('secret'), true)), $parts[1])) $st = json_decode($payload, true);
 }
-if (!is_array($st) || ($st['e'] ?? 0) < time()) sso_back('Sign-in took too long. Please try again.');
-if (($st['p'] ?? '') !== $p || !hash_equals((string) $st['s'], (string) ($_GET['state'] ?? ''))) sso_back('Sign-in couldn’t be checked. Please try again.');
+if (!is_array($st) || ($st['e'] ?? 0) < time()) sso_back('expired');
+if (($st['p'] ?? '') !== $p || !hash_equals((string) $st['s'], (string) ($_GET['state'] ?? ''))) sso_back('invalid');
 $code = (string) ($_GET['code'] ?? '');
-if ($code === '') sso_back('Sign-in couldn’t be checked. Please try again.');
+if ($code === '') sso_back('invalid');
 
 // Swap the code for tokens, server to server over HTTPS. Because the ID token comes straight from the provider's
 // token endpoint over TLS, its contents can be trusted without checking its signature (OpenID Connect Core 3.1.3.7).
@@ -106,7 +109,7 @@ curl_close($ch);
 $tok = is_string($res) ? json_decode($res, true) : null;
 if ($http !== 200 || !is_array($tok) || empty($tok['id_token'])) {
   error_log('Loop SSO token exchange failed (' . $p . ', HTTP ' . $http . '): ' . substr((string) $res, 0, 300));
-  sso_back('The ' . $prov['label'] . ' sign-in didn’t work. Try again, or use an email code.');
+  sso_back('failed');
 }
 $jwt = explode('.', (string) $tok['id_token']);
 $c = count($jwt) === 3 ? json_decode(sso_b64u_dec($jwt[1]), true) : null;
@@ -118,23 +121,23 @@ $ok = is_array($c)
   && (int) ($c['exp'] ?? 0) > $now - 60
   && (int) ($c['iat'] ?? 0) < $now + 300
   && hash_equals((string) $st['n'], (string) ($c['nonce'] ?? ''));
-if (!$ok) sso_back('Sign-in couldn’t be checked. Please try again.');
+if (!$ok) sso_back('invalid');
 
 // Which email does this account prove?
 $email = null;
 if ($p === 'google') {
-  if (($c['email_verified'] ?? false) !== true && ($c['email_verified'] ?? '') !== 'true') sso_back('That Google account’s email isn’t verified.');
+  if (($c['email_verified'] ?? false) !== true && ($c['email_verified'] ?? '') !== 'true') sso_back('unverified');
   if (!empty($prov['domain']) && strtolower((string) ($c['hd'] ?? '')) !== strtolower((string) $prov['domain']))
-    sso_back('Use your ' . $prov['domain'] . ' Google account.');
+    sso_back('domain');
   $email = clean_email((string) ($c['email'] ?? ''));
 } else {
-  if (strtolower((string) ($c['tid'] ?? '')) !== $prov['tenant']) sso_back('Use your work Microsoft account.');
+  if (strtolower((string) ($c['tid'] ?? '')) !== $prov['tenant']) sso_back('tenant');
   // Within your own tenant, the sign-in name is set by your administrator. Prefer it over the optional email claim.
   $email = clean_email((string) ($c['preferred_username'] ?? '')) ?: clean_email((string) ($c['email'] ?? ''));
 }
-if (!$email) sso_back('That account has no email address Loop can use.');
+if (!$email) sso_back('noemail');
 
 $person = person_by_email($email);
-if (!$person) sso_back($email . ' isn’t on ' . (is_local() ? org_short() . '’s Loop' : people_home()) . '. Ask your Loop admin to add you, or sign in with the email they used.');
+if (!$person) sso_back('notfound', $email);
 start_session($person['id']);
 sso_back();

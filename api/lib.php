@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 
-const LOOP_VERSION = '3.2.0';
+const LOOP_VERSION = '3.2.1';
 
 // Settings come from api/config.php. A host that runs many workspaces from one copy of Loop (loopsconnect's hosted
 // plan) sets $GLOBALS['LOOP_CFG'] itself before including this file.
@@ -271,7 +271,7 @@ function start_session(string $personId): void {
   $t = bin2hex(random_bytes(32));
   $exp = ms() + 180 * 86400000;
   q('INSERT INTO loop_sessions (token_hash, person_id, created_at, expires_at) VALUES (?,?,?,?)', [hash('sha256', $t), $personId, ms(), $exp]);
-  setcookie('loop_s', $t, ['expires' => intdiv($exp, 1000), 'path' => cookie_path(), 'secure' => is_https(), 'httponly' => true, 'samesite' => 'Lax']);
+  setcookie('loop_s', $t, ['expires' => intdiv($exp, 1000), 'path' => cookie_path(), 'secure' => is_https() || str_starts_with((string) cfg('app_url'), 'https:'), 'httponly' => true, 'samesite' => 'Lax']);
 }
 function end_session(): void {
   $t = $_COOKIE['loop_s'] ?? '';
